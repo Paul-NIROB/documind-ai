@@ -3,7 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import health, me
+from app.api import documents, health, me   # replaces the old import line
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -20,3 +20,4 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(me.router)
+app.include_router(documents.router)   # add below the existing include_router lines
