@@ -4,3 +4,4 @@ pydantic-settings
 pyjwt[crypto]
 supabase
 python-multipart
+pymupdf

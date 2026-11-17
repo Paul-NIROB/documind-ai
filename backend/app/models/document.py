@@ -1,4 +1,4 @@
-"""Pydantic schema describing a document in API responses."""
+"""Pydantic schemas describing documents in API responses."""
 
 from pydantic import BaseModel
 
@@ -11,3 +11,11 @@ class DocumentOut(BaseModel):
     status: str
     page_count: int | None = None
     created_at: str
+
+
+class ProcessResult(BaseModel):
+    """Summary returned after a document's text has been extracted."""
+
+    page_count: int
+    total_chars: int
+    empty_pages: int

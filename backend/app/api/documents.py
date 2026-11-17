@@ -1,4 +1,4 @@
-"""Routes to upload a PDF and list the current user's documents."""
+"""Routes to upload a PDF, list the current user's documents, and extract a document's text."""
 
 import logging
 import os
@@ -8,7 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 
 from app.core.auth import CurrentUser, get_current_user
 from app.db.client import get_supabase
-from app.models.document import DocumentOut
+from app.models.document import DocumentOut, ProcessResult
+from app.services.pdf_extractor import ExtractionError, extract_pages
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -76,3 +77,41 @@ def list_documents(user: CurrentUser = Depends(get_current_user)) -> list[dict]:
         .execute()
     )
     return result.data
+
+
+@router.post("/{document_id}/process", response_model=ProcessResult)
+def process_document(
+    document_id: uuid.UUID, user: CurrentUser = Depends(get_current_user)
+) -> dict:
+    """Extract the document's text and record its page count (chunking and embedding come next)."""
+    db = get_supabase()
+    found = (
+        db.table("documents")
+        .select("id, storage_path")
+        .eq("id", str(document_id))
+        .eq("user_id", user.id)  # ownership check: someone else's id looks exactly like a missing one
+        .execute()
+    )
+    if not found.data:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found")
+
+    try:
+        pdf_bytes = db.storage.from_(BUCKET).download(found.data[0]["storage_path"])
+    except Exception:
+        logger.exception("Storage download failed")
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Could not read the stored file") from None
+
+    try:
+        pages = extract_pages(pdf_bytes)
+    except ExtractionError as error:
+        db.table("documents").update({"status": "failed", "error_message": str(error)}).eq(
+            "id", str(document_id)
+        ).execute()  # the UI can show why a document failed instead of hanging forever
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error)) from None
+
+    db.table("documents").update({"page_count": len(pages)}).eq("id", str(document_id)).execute()
+    return {
+        "page_count": len(pages),
+        "total_chars": sum(len(page.text) for page in pages),
+        "empty_pages": sum(1 for page in pages if len(page.text) < 50),
+    }
